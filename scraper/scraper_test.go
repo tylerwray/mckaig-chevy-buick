@@ -89,7 +89,7 @@ func Test_Scraper(t *testing.T) {
 
 	s.Scrape(1)
 
-	list := s.TopThree()
+	list := s.Top(3)
 
 	if len(list) != 3 {
 		t.Error("Did not return the top three offenders")

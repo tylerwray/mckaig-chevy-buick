@@ -16,7 +16,7 @@ func main() {
 
 	s.Scrape(5)
 
-	offenders := s.TopThree()
+	offenders := s.Top(3)
 
 	for _, target := range offenders {
 		fmt.Printf("Name: %s\n", target.Name)

@@ -2,10 +2,10 @@ package scraper
 
 import (
 	"fmt"
-	"io"
 	"net/http"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/PuerkitoBio/goquery"
 )
@@ -37,24 +37,59 @@ func New(baseURL, queryParams string, client *http.Client) *Scraper {
 }
 
 // Scrape stars the scraping process
-func (s *Scraper) Scrape(pages int) {
-	for p := 1; p <= pages; p++ {
-		body, err := s.getPage(p)
-		if err != nil {
-			fmt.Printf("%v", err)
-		}
-		defer body.Close()
+func (s *Scraper) Scrape(numberOfPages int) {
+	wg := sync.WaitGroup{}
+	wg.Add(numberOfPages)
 
-		err = s.parseBody(body)
+	for page := 1; page <= numberOfPages; page++ {
+		go func(p int) {
+			err := s.fetchPage(p)
 
-		if err != nil {
-			fmt.Printf("%v", err)
-		}
+			if err != nil {
+				fmt.Printf("%v", err)
+			}
+
+			wg.Done()
+		}(page)
 	}
+
+	wg.Wait()
+}
+
+func (s *Scraper) fetchPage(page int) error {
+	URL := fmt.Sprintf("%s%d/?%s", s.baseURL, page, s.queryParams)
+
+	resp, err := s.client.Get(URL)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	doc, err := goquery.NewDocumentFromReader(resp.Body)
+
+	if err != nil {
+		return err
+	}
+
+	reviews := doc.Find(".review-wrapper")
+
+	reviews.Each(func(i int, selection *goquery.Selection) {
+		title := selection.Find("h3").Text()
+		name := selection.Find("span.notranslate.black").Text()
+		review := selection.Find(".review-content").Text()
+
+		s.reviews = append(s.reviews, Review{
+			Title:  title[1 : len(title)-1],
+			Name:   name[2:len(name)],
+			Review: review,
+		})
+	})
+
+	return nil
 }
 
 // TopThree all of the reviews, ranked by highest positivity
-func (s *Scraper) TopThree() []Review {
+func (s *Scraper) Top(num int) []Review {
 	keywords := []string{
 		"love",
 		"perfect",
@@ -83,7 +118,7 @@ func (s *Scraper) TopThree() []Review {
 
 	sortedReviews := sortByRank(s.reviews)
 
-	return sortedReviews[:3]
+	return sortedReviews[:num]
 }
 
 type byRank []Review
@@ -104,39 +139,4 @@ func sortByRank(reviews []Review) []Review {
 	sort.Sort(byRank(reviews))
 
 	return reviews
-}
-
-func (s *Scraper) getPage(page int) (io.ReadCloser, error) {
-	URL := fmt.Sprintf("%s%d/?%s", s.baseURL, page, s.queryParams)
-	resp, err := s.client.Get(URL)
-
-	if err != nil {
-		return nil, err
-	}
-
-	return resp.Body, nil
-}
-
-func (s *Scraper) parseBody(body io.Reader) error {
-	doc, err := goquery.NewDocumentFromReader(body)
-
-	if err != nil {
-		return err
-	}
-
-	reviews := doc.Find(".review-wrapper")
-
-	reviews.Each(func(i int, selection *goquery.Selection) {
-		title := selection.Find("h3").Text()
-		name := selection.Find("span.notranslate.black").Text()
-		review := selection.Find(".review-content").Text()
-
-		s.reviews = append(s.reviews, Review{
-			Title:  title[1 : len(title)-1],
-			Name:   name[2:len(name)],
-			Review: review,
-		})
-	})
-
-	return nil
 }
